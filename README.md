@@ -13,7 +13,9 @@ Parameters :
 
 Parameters 	
 Direction 	Name 	            Type 	Length/Values 	Options
+
   in        v_source_userid   INT     3              UNSIGNED ZERO FILLED
+  
   in        v_userid          INT     3              UNSIGNED ZERO FILLED
   
 ======================
