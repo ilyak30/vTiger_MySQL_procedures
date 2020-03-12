@@ -1,0 +1,118 @@
+BEGIN DECLARE exit_flag1                                                                            INT DEFAULT 0;
+  DECLARE v_unit_code, v_u_status_old, v_agreement_code, v_agreement_status,
+  v_u_status_new                                                                                VARCHAR(32);
+  DECLARE v_unitid, v_agreementid                                                               INTEGER(5);
+  DECLARE v_u_end_date, v_end_date, v_actual_end_date                                           DATE;
+  DECLARE cur1 CURSOR FOR SELECT u.code
+                               , u.unitid
+                               , u.unit_status
+                               , uc.cf_929
+                          FROM
+                            vtiger_units u, vtiger_unitscf uc
+                          WHERE
+                            u.unitid = uc.unitid
+                            AND unit_type <> ''
+                            AND unit_status <> 'test'
+                            and u.unitid not in (SELECT crmid FROM vtiger_crmentity where deleted=1 and setype='Units')
+                          ORDER BY
+                            unitid;
+  DECLARE CONTINUE HANDLER FOR SQLSTATE '02000' SET exit_flag1 = 1;
+
+  INSERT INTO proc_log (proc_name, comment) VALUES ('updateUnitsStatus', 'start');
+--     DROP TEMPORARY TABLE IF EXISTS temp_data;
+--     CREATE TEMPORARY TABLE temp_data(
+--       col1 VARCHAR(32),
+--       col2 VARCHAR(32),
+--       col3 VARCHAR(32),
+--       col4 VARCHAR(32),
+--       col5 VARCHAR(32),
+--       col6 VARCHAR(32),
+--       col7 VARCHAR(32),
+--       col8 VARCHAR(32),
+--       col9 VARCHAR(32),
+--       col10 VARCHAR(32)
+--     );
+  OPEN cur1;
+
+loop1:
+  LOOP
+    FETCH cur1 INTO v_unit_code, v_unitid, v_u_status_old, v_u_end_date;
+    IF exit_flag1 THEN
+      LEAVE loop1;
+    END IF;
+
+  block2:
+    BEGIN DECLARE exit_flag2 INT DEFAULT 0;
+      DECLARE cur2 CURSOR FOR SELECT code
+                                   , va.agreementid
+                                   , agreement_status
+                                   , case WHEN cf_1179 <> '' THEN vac.cf_1179 ELSE end_date END as end_date
+                                   , actual_end_date
+         
+                              FROM
+                                vtiger_agreements va, vtiger_agreementscf vac
+                              WHERE va.agreementid=vac.agreementid and
+                               va.agreementid = (SELECT max(va1.agreementid)
+                                               FROM
+                                                 vtiger_agreements va1, vtiger_agreementscf vac1
+                                               WHERE va1.agreementid=vac1.agreementid and
+                                                 unitid = v_unitid and tenant_contact_1<>13568
+                                                and va1.agreementid not in (SELECT crmid FROM vtiger_crmentity where deleted=1 and setype='Agreements')
+        AND (date_format(now(),'%Y-%m-%d') >= cf_1181  or date_format(now(),'%Y-%m-%d') >= start_date) 
+                               -- AND  (date_format(now(),'%Y-%m-%d') <= cf_1179 or date_format(now(),'%Y-%m-%d') <=end_date)
+                                                  );
+      DECLARE CONTINUE HANDLER FOR SQLSTATE '02000' SET exit_flag2 = 1;
+
+      OPEN cur2;
+
+    loop2:
+      LOOP
+        FETCH cur2 INTO v_agreement_code, v_agreementid, v_agreement_status, v_end_date, v_actual_end_date;
+        IF exit_flag2 THEN
+          LEAVE loop2;
+        END IF;
+        
+        IF v_agreement_status IN ('LIP - CT', 'COL - MI', 'LIP - LT/CT', 'MO - NTV') THEN
+          SET v_u_status_new = 'Occupied';
+        ELSEIF v_agreement_status = 'MO - LFR' THEN
+          SET v_u_status_new = 'Looking for Replacement';
+        ELSEIF v_agreement_status IN ('MO - MO') THEN
+          SET v_u_status_new = 'Moving Out';
+        ELSEIF v_agreement_status IN ('LIP - LE') THEN
+          SET v_u_status_new = 'Lease Extension';
+         ELSEIF v_agreement_status IN ('EOL - BOL') THEN
+          SET v_u_status_new = 'Moving Out';
+ ELSE
+          SET v_u_status_new = 'Available';
+        END IF;
+        IF v_u_status_old = 'Renovation' OR v_u_status_old = 'Suspended'  THEN
+  SET v_u_status_new = v_u_status_old;
+END IF;
+     -- IF v_u_status_new <> v_u_status_old THEN
+  INSERT INTO proc_log (proc_name, comment) VALUES ('updateUnitsStatus', v_unit_code);
+  UPDATE vtiger_units 
+  SET
+    unit_status = v_u_status_new
+  WHERE
+    unitid = v_unitid;
+  UPDATE vtiger_unitscf
+SET
+  cf_929 = v_actual_end_date, cf_2832 = v_agreement_status
+WHERE
+  unitid = v_unitid;
+ -- END IF;
+        
+ UPDATE vtiger_unitscf
+SET
+  cf_2832 = v_agreement_status, cf_2834 = v_end_date
+WHERE
+  unitid = v_unitid;
+         --   INSERT INTO temp_data (col1, col2, col3, col4, col5, col6, col7, col8, col9, col10) VALUES (v_unit_code, v_unitid, v_u_status_old, v_u_end_date, v_agreement_code, v_agreementid, v_agreement_status, v_end_date, v_actual_end_date, v_u_status_new);
+      END LOOP loop2;
+      CLOSE cur2;
+    END block2;
+  END LOOP loop1;
+  CLOSE cur1;
+  INSERT INTO proc_log (proc_name, comment) VALUES ('updateUnitsStatus', 'end');
+ -- SELECT *  FROM  temp_data;
+END
